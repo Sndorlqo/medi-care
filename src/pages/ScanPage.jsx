@@ -17,6 +17,7 @@ export default function ScanPage() {
   const [confidence, setConfidence] = useState(null)
   const [fields, setFields] = useState(null)
   const [result, setResult] = useState(null)
+  const [scanError, setScanError] = useState(null)
 
   const runScan = async (sampleKey) => {
     setStep('scanning')
@@ -24,6 +25,35 @@ export default function ScanPage() {
     setConfidence(confidence)
     setFields(fields)
     setStep('confirm')
+  }
+
+  const fileToBase64 = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result.split(',')[1])
+      reader.onerror = reject
+      reader.readAsDataURL(file)
+    })
+
+  const runRealScan = async (file) => {
+    setStep('scanning')
+    setScanError(null)
+    try {
+      const image = await fileToBase64(file)
+      const res = await fetch('/api/ocr', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image, format: file.type.split('/')[1] || 'jpg' }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || '인식에 실패했어요.')
+      setConfidence(data.confidence)
+      setFields(data.fields)
+      setStep('confirm')
+    } catch (err) {
+      setScanError(err.message)
+      setStep('pick')
+    }
   }
 
   const toggleTime = (slot) => {
@@ -55,15 +85,24 @@ export default function ScanPage() {
       {step === 'pick' && (
         <div className="stack">
           <p className="muted">
-            카메라로 촬영하거나(모바일), 샘플 약봉투로 인식을 체험해보세요.
+            카메라로 촬영하면 실제 사진을 인식해요. 카메라가 없다면 샘플로 체험해보세요.
           </p>
+          {scanError && (
+            <div className="card" style={{ background: 'var(--danger-bg)', borderColor: 'var(--danger)' }}>
+              <p style={{ color: 'var(--danger)' }}>인식 실패: {scanError}</p>
+            </div>
+          )}
           <input
             ref={fileInput}
             type="file"
             accept="image/*"
             capture="environment"
             style={{ display: 'none' }}
-            onChange={() => runScan(undefined)}
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) runRealScan(file)
+              e.target.value = ''
+            }}
           />
           <button type="button" onClick={() => fileInput.current?.click()}>
             📷 사진 촬영하기
