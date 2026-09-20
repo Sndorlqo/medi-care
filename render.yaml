@@ -2,6 +2,7 @@ services:
   - type: web
     name: silver-care
     runtime: node
+    plan: free
     buildCommand: npm install && npm run build
     startCommand: node server/index.js
     envVars:
