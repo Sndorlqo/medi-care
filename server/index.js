@@ -123,6 +123,7 @@ app.get('/api/nearby-places', async (req, res) => {
 
 app.get('/api/kakao-profile', async (req, res) => {
   const { code, redirectUri } = req.query
+  console.log('[kakao-profile] request received:', { code: code?.slice(0, 8) + '...', redirectUri })
   if (!code || !redirectUri) return res.status(400).json({ error: 'code/redirectUri가 필요해요.' })
   if (!KAKAO_REST_API_KEY) return res.status(500).json({ error: 'KAKAO_REST_API_KEY가 설정되지 않았어요.' })
 
@@ -153,6 +154,7 @@ app.get('/api/kakao-profile', async (req, res) => {
       return res.status(profileRes.status).json({ error: '카카오 프로필 조회에 실패했어요.' })
     }
 
+    console.log('[kakao-profile] profile response:', JSON.stringify(profile))
     const nickname = profile.kakao_account?.profile?.nickname || profile.properties?.nickname || ''
     res.json({ nickname })
   } catch (err) {
