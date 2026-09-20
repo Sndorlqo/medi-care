@@ -2,6 +2,7 @@ import { useContext, useEffect, useState } from 'react'
 import { emptyData } from './seed.js'
 import { getCareInstructions, getMedicineApiInstructions } from './interactions.js'
 import { DataContext } from './context.jsx'
+import { todayStr } from '../lib/time.js'
 
 const STORAGE_KEY = 'silverCareData'
 
@@ -87,8 +88,17 @@ export function DataProvider({ children }) {
   const clearReminder = () =>
     setData((d) => ({ ...d, reminder: null }))
 
+  // Called right when a drug is newly registered for a slot whose alarm time
+  // already passed today — without this, the very next alarm tick would fire
+  // immediately since nothing's logged for that slot yet.
+  const suppressAlarmToday = (slot) =>
+    setData((d) => ({
+      ...d,
+      suppressedAlarms: [...new Set([...d.suppressedAlarms, `${todayStr()}-${slot}`])],
+    }))
+
   return (
-    <DataContext.Provider value={{ data, update, addDrug, removeDrug, setAlarmTime, logCheckIn, sendReminder, clearReminder }}>
+    <DataContext.Provider value={{ data, update, addDrug, removeDrug, setAlarmTime, logCheckIn, sendReminder, clearReminder, suppressAlarmToday }}>
       {children}
     </DataContext.Provider>
   )

@@ -6,11 +6,11 @@ import { getCareInstructions, summarizeCareInstruction } from '../data/interacti
 import { speak } from '../lib/tts.js'
 import { todayStr, isSlotDue } from '../lib/time.js'
 
-function buildMessage(slot, drugs) {
+function buildMessage(name, slot, drugs) {
   const careLines = [...new Set(drugs.flatMap((drug) =>
     [...(drug.careInstructions ?? []), ...getCareInstructions(drug)]
   ))].map(summarizeCareInstruction).filter(Boolean).slice(0, 3)
-  const base = `어르신, ${slot} 약 복용하실 시간입니다.`
+  const base = `${name || '어르신'}, ${slot} 약 복용하실 시간입니다.`
   return careLines.length
     ? `${base} 복용 주의사항입니다. ${careLines.join('. ')}`
     : base
@@ -48,11 +48,12 @@ export default function AlarmWatcher() {
         const drugs = data.drugs.filter((drug) => drug.times.includes(slot))
         const key = `${todayStr()}-${slot}`
         if (!drugs.length || announced.current.has(key)) continue
+        if (data.suppressedAlarms?.includes(key)) continue
         if (!isSlotDue(slot, data.alarmTimes, data.logs)) continue
 
         announced.current.add(key)
         playAlarmSound()
-        speak(buildMessage(slot, drugs))
+        speak(buildMessage(data.patient.name, slot, drugs))
         setActiveAlarm({ slot, drugs })
         navigate('/home')
         break
@@ -72,7 +73,7 @@ export default function AlarmWatcher() {
     announcedReminderId.current = reminder.id
 
     const drugs = data.drugs.filter((drug) => drug.times.includes(reminder.slot))
-    const message = reminder.message?.trim() || buildMessage(reminder.slot, drugs)
+    const message = reminder.message?.trim() || buildMessage(data.patient.name, reminder.slot, drugs)
     playAlarmSound()
     speak(message)
     setActiveAlarm({ slot: reminder.slot, drugs, message: reminder.message?.trim(), fromGuardian: true })

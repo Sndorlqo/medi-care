@@ -4,6 +4,7 @@ import { useData } from '../data/store.jsx'
 import { mockOcrScan } from '../data/mockOcr.js'
 import { checkInteractions, getCareInstructions, getMedicineApiInstructions } from '../data/interactions.js'
 import { OCR_MULTI_SAMPLE, OCR_SAMPLES, SLOTS } from '../data/seed.js'
+import { isSlotDue } from '../lib/time.js'
 import WarningBanner from '../components/WarningBanner.jsx'
 
 const LOW_CONFIDENCE = 0.7
@@ -30,7 +31,7 @@ function normalizeMedications(medications, fallback) {
 }
 
 export default function ScanPage() {
-  const { data, addDrug } = useData()
+  const { data, addDrug, suppressAlarmToday } = useData()
   const navigate = useNavigate()
   const fileInput = useRef(null)
   const videoRef = useRef(null)
@@ -188,6 +189,14 @@ export default function ScanPage() {
     }))
     const warnings = drugs.flatMap((drug) => checkInteractions(drug, data.drugs))
     drugs.forEach(addDrug)
+
+    // A slot whose alarm time already passed today shouldn't fire the moment
+    // it's registered — the user just added it, they haven't missed anything yet.
+    const newSlots = new Set(drugs.flatMap((drug) => drug.times))
+    for (const slot of newSlots) {
+      if (isSlotDue(slot, data.alarmTimes, data.logs)) suppressAlarmToday(slot)
+    }
+
     setResult({ drugs, warnings })
     setStep('done')
   }

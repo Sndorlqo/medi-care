@@ -95,5 +95,6 @@ export function emptyData() {
     alarmTimes: { 아침: '08:00', 점심: '12:30', 저녁: '18:30', 자기전: '22:00' },
     logs: [],
     reminder: null,
+    suppressedAlarms: [],
   }
 }
