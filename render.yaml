@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: silver-care
+    runtime: node
+    buildCommand: npm install && npm run build
+    startCommand: node server/index.js
+    envVars:
+      - key: CLOVA_OCR_INVOKE_URL
+        sync: false
+      - key: CLOVA_OCR_SECRET
+        sync: false
+      - key: KAKAO_REST_API_KEY
+        sync: false
+      - key: KAKAO_CLIENT_SECRET
+        sync: false
+      - key: VITE_KAKAO_JAVASCRIPT_KEY
+        sync: false
+      - key: MEDICINE_API_SERVICE_KEY
+        sync: false

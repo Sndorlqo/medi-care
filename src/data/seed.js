@@ -71,14 +71,29 @@ export const OCR_SAMPLES = [
   },
 ]
 
+export const OCR_MULTI_SAMPLE = {
+  key: 'attached-prescription',
+  confidence: 0.95,
+  medications: [
+    { name: '펠루비정', dose: '1정', frequencyPerDay: 3, totalDays: 7, times: [], tags: [] },
+    { name: '포타스틴오디정', dose: '1정', frequencyPerDay: 2, totalDays: 7, times: [], tags: [] },
+    { name: '코슈정', dose: '0.5정', frequencyPerDay: 3, totalDays: 7, times: [], tags: [] },
+    { name: '엘스테인캡슐', dose: '1캡슐', frequencyPerDay: 3, totalDays: 7, times: [], tags: [] },
+    { name: '스트렌정', dose: '1정', frequencyPerDay: 3, totalDays: 7, times: [], tags: [] },
+    { name: '코대원에스시럽', dose: '1포', frequencyPerDay: 3, totalDays: 7, times: [], tags: [] },
+    { name: '세프틸정250mg', dose: '1정', frequencyPerDay: 2, totalDays: 7, times: [], tags: [] },
+  ],
+}
+
 export function emptyData() {
   return {
     onboarded: false,
-    patient: { name: '', age: '', phone: '' },
-    guardian: { name: '', phone: '' },
+    patient: { name: '', age: '', phone: '', weight: '', conditions: '', surgery: '' },
+    guardian: { phone: '', consent: false },
     hospital: null,
     drugs: [],
     alarmTimes: { 아침: '08:00', 점심: '12:30', 저녁: '18:30', 자기전: '22:00' },
     logs: [],
+    reminder: null,
   }
 }

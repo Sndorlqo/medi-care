@@ -2,23 +2,16 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../data/store.jsx'
 
-const STEPS = ['patient', 'guardian', 'hospital']
-
 export default function OnboardingPage() {
   const { data, update } = useData()
   const navigate = useNavigate()
-  const [step, setStep] = useState(0)
   const [patient, setPatient] = useState(data.patient)
   const [guardian, setGuardian] = useState(data.guardian)
   const [hospital, setHospital] = useState(data.hospital ?? { name: '', doctor: '' })
 
-  const next = () => {
-    if (step === 0) update({ patient })
-    if (step === 1) update({ guardian })
-    if (step < STEPS.length - 1) {
-      setStep(step + 1)
-      return
-    }
+  const setPatientField = (field) => (e) => setPatient({ ...patient, [field]: e.target.value })
+
+  const submit = () => {
     update({
       patient,
       guardian,
@@ -30,72 +23,62 @@ export default function OnboardingPage() {
 
   return (
     <div className="page">
-      <h1>프로필 설정</h1>
-      <p className="muted">{step + 1} / {STEPS.length} 단계</p>
+      <h1>내 정보 등록</h1>
+      <p className="muted">건강 정보를 알려주세요. 안전한 복약 안내를 위해 꼭 필요해요.</p>
 
-      {step === 0 && (
-        <div className="card stack">
-          <h2>환자 본인 정보</h2>
-          <label htmlFor="p-name">이름</label>
-          <input
-            id="p-name"
-            value={patient.name}
-            onChange={(e) => setPatient({ ...patient, name: e.target.value })}
-          />
-          <label htmlFor="p-age">나이</label>
-          <input
-            id="p-age"
-            type="number"
-            value={patient.age}
-            onChange={(e) => setPatient({ ...patient, age: e.target.value })}
-          />
-          <label htmlFor="p-phone">연락처</label>
-          <input
-            id="p-phone"
-            value={patient.phone}
-            onChange={(e) => setPatient({ ...patient, phone: e.target.value })}
-          />
+      <div className="card stack">
+        <div className="field-grid">
+          <div>
+            <label htmlFor="p-name">이름 *</label>
+            <input id="p-name" value={patient.name} onChange={setPatientField('name')} />
+          </div>
+          <div>
+            <label htmlFor="p-age">나이 *</label>
+            <input id="p-age" type="number" value={patient.age} onChange={setPatientField('age')} />
+          </div>
         </div>
-      )}
 
-      {step === 1 && (
-        <div className="card stack">
-          <h2>보호자 연동</h2>
-          <label htmlFor="g-name">보호자 이름</label>
-          <input
-            id="g-name"
-            value={guardian.name}
-            onChange={(e) => setGuardian({ ...guardian, name: e.target.value })}
-          />
-          <label htmlFor="g-phone">보호자 연락처</label>
-          <input
-            id="g-phone"
-            value={guardian.phone}
-            onChange={(e) => setGuardian({ ...guardian, phone: e.target.value })}
-          />
+        <label htmlFor="p-conditions">기저질환</label>
+        <input id="p-conditions" placeholder="고혈압, 당뇨" value={patient.conditions} onChange={setPatientField('conditions')} />
+
+        <div className="field-grid">
+          <div>
+            <label htmlFor="p-weight">몸무게</label>
+            <input id="p-weight" placeholder="68kg" value={patient.weight} onChange={setPatientField('weight')} />
+          </div>
+          <div>
+            <label htmlFor="p-surgery">수술 여부</label>
+            <input id="p-surgery" placeholder="없음" value={patient.surgery} onChange={setPatientField('surgery')} />
+          </div>
         </div>
-      )}
 
-      {step === 2 && (
-        <div className="card stack">
-          <h2>주요 병원 정보 (선택)</h2>
-          <label htmlFor="h-name">병원명</label>
-          <input
-            id="h-name"
-            value={hospital.name}
-            onChange={(e) => setHospital({ ...hospital, name: e.target.value })}
-          />
-          <label htmlFor="h-doctor">담당 진료과</label>
-          <input
-            id="h-doctor"
-            value={hospital.doctor}
-            onChange={(e) => setHospital({ ...hospital, doctor: e.target.value })}
-          />
+        <div className="field-grid">
+          <div>
+            <label htmlFor="h-name">다니는 병원</label>
+            <input id="h-name" value={hospital.name} onChange={(e) => setHospital({ ...hospital, name: e.target.value })} />
+          </div>
+          <div>
+            <label htmlFor="h-doctor">진료과</label>
+            <input id="h-doctor" value={hospital.doctor} onChange={(e) => setHospital({ ...hospital, doctor: e.target.value })} />
+          </div>
         </div>
-      )}
 
-      <button type="button" onClick={next}>
-        {step < STEPS.length - 1 ? '다음' : '시작하기'}
+        <h2 style={{ marginTop: 8 }}>보호자 연결</h2>
+        <label htmlFor="g-phone">보호자 연락처 *</label>
+        <input id="g-phone" value={guardian.phone} onChange={(e) => setGuardian({ ...guardian, phone: e.target.value })} />
+        <label className="checkbox-row" htmlFor="g-consent">
+          <input
+            id="g-consent"
+            type="checkbox"
+            checked={guardian.consent}
+            onChange={(e) => setGuardian({ ...guardian, consent: e.target.checked })}
+          />
+          복약 상태 알림 수신에 동의합니다
+        </label>
+      </div>
+
+      <button type="button" onClick={submit}>
+        등록하고 시작하기
       </button>
     </div>
   )

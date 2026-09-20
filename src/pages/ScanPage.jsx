@@ -1,54 +1,105 @@
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useData } from '../data/store.jsx'
 import { mockOcrScan } from '../data/mockOcr.js'
-import { checkInteractions, getCareInstructions } from '../data/interactions.js'
-import { OCR_SAMPLES, SLOTS } from '../data/seed.js'
+import { checkInteractions, getCareInstructions, getMedicineApiInstructions } from '../data/interactions.js'
+import { OCR_MULTI_SAMPLE, OCR_SAMPLES, SLOTS } from '../data/seed.js'
 import WarningBanner from '../components/WarningBanner.jsx'
 
 const LOW_CONFIDENCE = 0.7
+
+function getDefaultTimes(frequencyPerDay) {
+  if (frequencyPerDay === 3) return ['아침', '점심', '저녁']
+  if (frequencyPerDay === 2) return ['아침', '저녁']
+  return []
+}
+
+function normalizeMedications(medications, fallback) {
+  const source = medications?.length ? medications : fallback ? [fallback] : []
+  return source.filter((medication) => medication?.name?.trim()).map((medication) => ({
+    ...medication,
+    name: medication.name.trim(),
+    dose: medication.dose || '',
+    frequencyPerDay: Number(medication.frequencyPerDay) || 1,
+    totalDays: Number(medication.totalDays) || 30,
+    times: Array.isArray(medication.times) && medication.times.length
+      ? medication.times
+      : getDefaultTimes(Number(medication.frequencyPerDay) || 1),
+    tags: Array.isArray(medication.tags) ? medication.tags : [],
+  }))
+}
 
 export default function ScanPage() {
   const { data, addDrug } = useData()
   const navigate = useNavigate()
   const fileInput = useRef(null)
+  const videoRef = useRef(null)
+  const streamRef = useRef(null)
 
   const [step, setStep] = useState('pick')
   const [confidence, setConfidence] = useState(null)
   const [fields, setFields] = useState(null)
   const [result, setResult] = useState(null)
   const [scanError, setScanError] = useState(null)
+  const [cameraOpen, setCameraOpen] = useState(false)
+  const [selectedFileName, setSelectedFileName] = useState('')
+
+  useEffect(() => () => streamRef.current?.getTracks().forEach((track) => track.stop()), [])
 
   const runScan = async (sampleKey) => {
     setStep('scanning')
-    const { confidence, fields } = await mockOcrScan(sampleKey)
+    const { confidence, fields, medications } = await mockOcrScan(sampleKey)
     setConfidence(confidence)
-    setFields(fields)
+    setFields(normalizeMedications(medications, fields))
     setStep('confirm')
   }
 
-  const fileToBase64 = (file) =>
-    new Promise((resolve, reject) => {
-      const reader = new FileReader()
-      reader.onload = () => resolve(reader.result.split(',')[1])
-      reader.onerror = reject
-      reader.readAsDataURL(file)
-    })
+  const fileToBase64 = (file) => new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/') || file.type === 'image/heic' || file.type === 'image/heif') {
+      reject(new Error('HEIC 사진은 지원되지 않아요. JPG 사진으로 다시 선택해주세요.'))
+      return
+    }
+
+    const objectUrl = URL.createObjectURL(file)
+    const image = new Image()
+    image.onload = () => {
+      const maxDimension = 2000
+      const scale = Math.min(1, maxDimension / Math.max(image.naturalWidth, image.naturalHeight))
+      const canvas = document.createElement('canvas')
+      canvas.width = Math.round(image.naturalWidth * scale)
+      canvas.height = Math.round(image.naturalHeight * scale)
+      canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height)
+      URL.revokeObjectURL(objectUrl)
+      resolve(canvas.toDataURL('image/jpeg', 0.9).split(',')[1])
+    }
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl)
+      reject(new Error('사진을 읽을 수 없어요. JPG 또는 PNG 사진을 선택해주세요.'))
+    }
+    image.src = objectUrl
+  })
 
   const runRealScan = async (file) => {
     setStep('scanning')
     setScanError(null)
+    setSelectedFileName(file.name)
     try {
       const image = await fileToBase64(file)
       const res = await fetch('/api/ocr', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, format: file.type.split('/')[1] || 'jpg' }),
+        body: JSON.stringify({ image, format: 'jpg' }),
       })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error || '인식에 실패했어요.')
+      const contentType = res.headers.get('content-type') || ''
+      const data = contentType.includes('application/json')
+        ? await res.json()
+        : { error: await res.text() }
+      if (!res.ok) throw new Error(data.error || `OCR 서버 오류 (${res.status})`)
+      if (!data.fields && !data.medications) throw new Error('OCR 결과를 받지 못했어요. 사진을 다시 선택해주세요.')
+      const recognizedMedications = normalizeMedications(data.medications, data.fields)
+      if (!recognizedMedications.length) throw new Error('약 이름을 찾지 못했어요. 약 이름이 보이도록 다시 촬영해주세요.')
       setConfidence(data.confidence)
-      setFields(data.fields)
+      setFields(recognizedMedications)
       setStep('confirm')
     } catch (err) {
       setScanError(err.message)
@@ -56,25 +107,88 @@ export default function ScanPage() {
     }
   }
 
-  const toggleTime = (slot) => {
-    setFields((f) => ({
-      ...f,
-      times: f.times.includes(slot)
-        ? f.times.filter((t) => t !== slot)
-        : [...f.times, slot],
-    }))
+  const openCamera = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      fileInput.current?.click()
+      return
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: { ideal: 'environment' } },
+        audio: false,
+      })
+      streamRef.current = stream
+      setCameraOpen(true)
+      requestAnimationFrame(() => {
+        if (videoRef.current) videoRef.current.srcObject = stream
+      })
+    } catch {
+      setScanError('카메라를 열 수 없어요. 브라우저의 카메라 권한을 허용하거나 사진 파일을 선택해주세요.')
+      fileInput.current?.click()
+    }
   }
 
-  const save = () => {
-    const drug = {
+  const closeCamera = () => {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+    setCameraOpen(false)
+  }
+
+  const capturePhoto = () => {
+    const video = videoRef.current
+    if (!video?.videoWidth || !video.videoHeight) return
+    const canvas = document.createElement('canvas')
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    canvas.toBlob((blob) => {
+      if (blob) {
+        closeCamera()
+        runRealScan(new File([blob], 'prescription.jpg', { type: 'image/jpeg' }))
+      }
+    }, 'image/jpeg', 0.9)
+  }
+
+  const toggleMedicationTime = (medicationIndex, slot) => {
+    setFields((medications) => medications.map((medication, index) => index === medicationIndex
+      ? {
+          ...medication,
+          times: medication.times.includes(slot)
+            ? medication.times.filter((time) => time !== slot)
+            : [...medication.times, slot],
+        }
+      : medication
+    ))
+  }
+
+  const save = async () => {
+    const drugs = await Promise.all(fields.map(async (medication) => {
+      let medicineInfo = null
+      try {
+        const response = await fetch(`/api/medicine-info?name=${encodeURIComponent(medication.name)}`)
+        if (response.ok) {
+          const result = await response.json()
+          medicineInfo = result.medicine
+            ? { ...result.medicine, source: result.source, sourceUrl: result.sourceUrl }
+            : null
+        }
+      } catch {
+        // Keep registration available when the external service is unavailable.
+      }
+
+      const apiInstructions = getMedicineApiInstructions(medicineInfo)
+      return {
       id: crypto.randomUUID(),
       startDate: new Date().toISOString().slice(0, 10),
-      ...fields,
-      careInstructions: getCareInstructions(fields),
-    }
-    const warnings = checkInteractions(drug, data.drugs)
-    addDrug(drug)
-    setResult({ drug, warnings })
+      ...medication,
+      medicineInfo,
+      careInstructions: [...new Set([...getCareInstructions(medication), ...apiInstructions])],
+      }
+    }))
+    const warnings = drugs.flatMap((drug) => checkInteractions(drug, data.drugs))
+    drugs.forEach(addDrug)
+    setResult({ drugs, warnings })
     setStep('done')
   }
 
@@ -94,20 +208,57 @@ export default function ScanPage() {
           )}
           <input
             ref={fileInput}
+            id="prescription-file"
             type="file"
             accept="image/*"
             capture="environment"
-            style={{ display: 'none' }}
+            style={{ position: 'absolute', width: 1, height: 1, opacity: 0 }}
             onChange={(e) => {
               const file = e.target.files?.[0]
-              if (file) runRealScan(file)
+              if (file) {
+                setSelectedFileName(file.name)
+                runRealScan(file)
+              } else {
+                setScanError('사진을 선택하지 않았어요.')
+              }
               e.target.value = ''
             }}
           />
-          <button type="button" onClick={() => fileInput.current?.click()}>
-            📷 사진 촬영하기
+          <button
+            type="button"
+            onClick={() => {
+              setScanError(null)
+              fileInput.current?.click()
+            }}
+          >
+            📁 사진 파일 선택하기
           </button>
+          {selectedFileName && <p className="muted">선택한 파일: {selectedFileName}</p>}
+          <button type="button" onClick={openCamera}>
+            📷 카메라로 촬영하기
+          </button>
+          {cameraOpen && (
+            <div className="card stack">
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                style={{ width: '100%', borderRadius: 12, background: '#111' }}
+              />
+              <div className="row">
+                <button type="button" onClick={capturePhoto}>사진 촬영</button>
+                <button type="button" className="secondary" onClick={closeCamera}>닫기</button>
+              </div>
+            </div>
+          )}
           <p className="muted" style={{ marginTop: 12 }}>샘플로 체험하기</p>
+          <button
+            type="button"
+            onClick={() => runScan(OCR_MULTI_SAMPLE.key)}
+          >
+            첨부 약봉투 샘플 ({OCR_MULTI_SAMPLE.medications.length}개 약)
+          </button>
           {OCR_SAMPLES.map((s) => (
             <button
               key={s.key}
@@ -130,6 +281,7 @@ export default function ScanPage() {
 
       {step === 'confirm' && fields && (
         <div className="stack">
+          <p className="muted">인식된 약 {fields.length}개</p>
           {confidence < LOW_CONFIDENCE && (
             <div className="card" style={{ background: 'var(--warning-bg)', borderColor: 'var(--warning)' }}>
               <p style={{ color: 'var(--warning)' }}>
@@ -141,49 +293,67 @@ export default function ScanPage() {
             </div>
           )}
 
-          <div className="card stack">
-            <label htmlFor="d-name">약 이름</label>
-            <input
-              id="d-name"
-              value={fields.name}
-              onChange={(e) => setFields({ ...fields, name: e.target.value })}
-            />
-            <label htmlFor="d-dose">1회 복용량</label>
-            <input
-              id="d-dose"
-              value={fields.dose}
-              onChange={(e) => setFields({ ...fields, dose: e.target.value })}
-            />
-            <label htmlFor="d-freq">1일 복용 횟수</label>
-            <input
-              id="d-freq"
-              type="number"
-              value={fields.frequencyPerDay}
-              onChange={(e) =>
-                setFields({ ...fields, frequencyPerDay: Number(e.target.value) })
-              }
-            />
-            <label htmlFor="d-days">총 복용 일수</label>
-            <input
-              id="d-days"
-              type="number"
-              value={fields.totalDays}
-              onChange={(e) => setFields({ ...fields, totalDays: Number(e.target.value) })}
-            />
-            <label>복용 시간대</label>
-            <div className="row">
-              {SLOTS.map((slot) => (
-                <button
-                  key={slot}
-                  type="button"
-                  className={fields.times.includes(slot) ? '' : 'secondary'}
-                  onClick={() => toggleTime(slot)}
-                >
-                  {slot}
-                </button>
-              ))}
+          {fields.map((medication, medicationIndex) => (
+            <div className="card stack" key={`${medication.name}-${medicationIndex}`}>
+              <h2>약 {medicationIndex + 1}</h2>
+              <label htmlFor={`d-name-${medicationIndex}`}>약 이름</label>
+              <input
+                id={`d-name-${medicationIndex}`}
+                value={medication.name}
+                onChange={(e) => setFields((items) => items.map((item, index) =>
+                  index === medicationIndex ? { ...item, name: e.target.value } : item
+                ))}
+              />
+              <label htmlFor={`d-dose-${medicationIndex}`}>1회 복용량</label>
+              <input
+                id={`d-dose-${medicationIndex}`}
+                value={medication.dose}
+                onChange={(e) => setFields((items) => items.map((item, index) =>
+                  index === medicationIndex ? { ...item, dose: e.target.value } : item
+                ))}
+              />
+              <label htmlFor={`d-freq-${medicationIndex}`}>1일 복용 횟수</label>
+              <input
+                id={`d-freq-${medicationIndex}`}
+                type="number"
+                value={medication.frequencyPerDay}
+                onChange={(e) => setFields((items) => items.map((item, index) =>
+                  index === medicationIndex
+                    ? {
+                        ...item,
+                        frequencyPerDay: Number(e.target.value),
+                        times: getDefaultTimes(Number(e.target.value)).length
+                          ? getDefaultTimes(Number(e.target.value))
+                          : item.times,
+                      }
+                    : item
+                ))}
+              />
+              <label htmlFor={`d-days-${medicationIndex}`}>총 복용 일수</label>
+              <input
+                id={`d-days-${medicationIndex}`}
+                type="number"
+                value={medication.totalDays}
+                onChange={(e) => setFields((items) => items.map((item, index) =>
+                  index === medicationIndex ? { ...item, totalDays: Number(e.target.value) } : item
+                ))}
+              />
+              <label>복용 시간대</label>
+              {medication.times.length === 0 && <p className="muted">사진에서 시간대가 확인되지 않았어요. 직접 선택해주세요.</p>}
+              <div className="row">
+                {SLOTS.map((slot) => (
+                  <button
+                    key={slot}
+                    type="button"
+                    className={medication.times.includes(slot) ? '' : 'secondary'}
+                    onClick={() => toggleMedicationTime(medicationIndex, slot)}
+                  >
+                    {slot}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
+          ))}
 
           <button type="button" onClick={save}>
             저장하기
@@ -194,9 +364,14 @@ export default function ScanPage() {
       {step === 'done' && result && (
         <div className="stack">
           <div className="card">
-            <h2>✅ {result.drug.name} 등록 완료</h2>
-            {result.drug.careInstructions.map((c, i) => (
-              <p key={i}>· {c}</p>
+            <h2>✅ {result.drugs.length}개 약 등록 완료</h2>
+            {result.drugs.map((drug) => (
+              <div key={drug.id}>
+                <strong>{drug.name}</strong>
+                {drug.careInstructions.map((careInstruction, index) => (
+                  <p key={index}>· {careInstruction}</p>
+                ))}
+              </div>
             ))}
           </div>
           <WarningBanner warnings={result.warnings} />
